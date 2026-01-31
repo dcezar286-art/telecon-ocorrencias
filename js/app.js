@@ -540,7 +540,7 @@ els.fileInput.addEventListener('change', async (e)=>{
     return;
   }
 
-  els.hint.textContent = `Planilha carregada: ${file.name} • ${days.length} dias detectados`;
+  els.hint.textContent = '';
   buildSelect(els.daySelect, days.map(d=>({value:d,label:formatBRDate(d)})), 'Selecione o dia');
   setDisabled(false);
 
