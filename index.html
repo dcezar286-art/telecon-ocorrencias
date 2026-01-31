@@ -3,16 +3,18 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Telecom Ticket Lens • Filtragem de Planilha</title>
+  <title>Telecom Relatórios • Filtragem de Planilha</title>
   <link rel="stylesheet" href="assets/style.css" />
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <div class="logo">TL</div>
+      <div class="logo">TR</div>
       <div>
-        <div class="title">Telecom Ticket Lens</div>
+        <div class="title">Telecom Relatórios</div>
         <div class="subtitle">Upload do Excel → filtros do dia → relatório por técnico → exportar</div>
       </div>
     </div>
@@ -21,7 +23,8 @@
         <input id="fileInput" type="file" accept=".xlsx,.xls" />
         Importar planilha
       </label>
-      <button id="exportBtn" class="btn secondary" disabled>Exportar relatório</button>
+      <button id="exportPdfBtn" class="btn secondary" disabled>Exportar PDF</button>
+      <button id="exportXlsxBtn" class="btn secondary" disabled>Exportar Excel</button>
     </div>
   </header>
 
@@ -89,7 +92,7 @@
     </section>
 
     <footer class="footer">
-      <span>Feito em JS + CSS • Leitura de Excel com SheetJS (xlsx)</span>
+      <span>Feito em JS + CSS • Excel → Relatórios</span>
       <span class="muted">Padrão atual: abas por dia + linhas “OCORRÊNCIAS DO DIA : ...”</span>
     </footer>
   </main>
