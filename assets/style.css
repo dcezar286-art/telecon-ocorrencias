@@ -159,3 +159,14 @@ a.link:hover{text-decoration:underline}
 
 .footer{display:flex; justify-content:space-between; gap:12px; color:var(--muted); font-size:12px; margin-top:10px}
 .muted{opacity:.85}
+
+/* Fix dropdown list colors on dark theme (Chrome/Edge/Firefox) */
+select option{
+  background: rgba(18,26,51,.98);
+  color: var(--text);
+}
+select:focus{
+  border-color: rgba(156,194,255,.55);
+  box-shadow: 0 0 0 3px rgba(42,89,255,.18);
+}
+
