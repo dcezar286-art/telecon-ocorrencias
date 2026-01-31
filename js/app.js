@@ -1,9 +1,10 @@
-// Telecom Ticket Lens - Excel filter + report (SheetJS)
+// Telecom Relatórios - Excel filter + report (SheetJS)
 // Padrão: abas por dia (nome como 29042025 etc), tabela com cabeçalho "PERÍODO" e linhas de ocorrência "OCORRÊNCIAS DO DIA : ..."
 
 const els = {
   fileInput: document.getElementById('fileInput'),
-  exportBtn: document.getElementById('exportBtn'),
+  exportPdfBtn: document.getElementById('exportPdfBtn'),
+  exportXlsxBtn: document.getElementById('exportXlsxBtn'),
   daySelect: document.getElementById('daySelect'),
   techSelect: document.getElementById('techSelect'),
   motivoSelect: document.getElementById('motivoSelect'),
@@ -30,17 +31,29 @@ const normalize = (v) => {
 
 const safeStr = (v) => (v === null || v === undefined) ? '' : String(v).trim();
 
+// Converte 'ddmmaaaa' -> 'dd/mm/aaaa' quando fizer sentido
+function formatBRDate(v){
+  const s = safeStr(v);
+  if(/^\d{8}$/.test(s)){
+    const dd = s.slice(0,2), mm = s.slice(2,4), yyyy = s.slice(4,8);
+    return `${dd}/${mm}/${yyyy}`;
+  }
+  const m = s.match(/^(\d{2})[\-\.](\d{2})[\-\.](\d{4})$/);
+  if(m) return `${m[1]}/${m[2]}/${m[3]}`;
+  return s;
+}
+
 function setDisabled(disabled){
   els.daySelect.disabled = disabled;
   els.techSelect.disabled = disabled;
   els.motivoSelect.disabled = disabled;
   els.periodoSelect.disabled = disabled;
   els.searchInput.disabled = disabled;
-  els.exportBtn.disabled = disabled;
+  els.exportPdfBtn.disabled = disabled;
+  els.exportXlsxBtn.disabled = disabled;
 }
 
 function isDateSheet(name){
-  // aceita "29042025" e também com espaços tipo " 15052025"
   return /^\s*\d{8}\s*$/.test(name);
 }
 
@@ -49,7 +62,6 @@ function sheetToMatrix(ws){
 }
 
 function findHeaderRow(matrix){
-  // procura linha que tenha "PERÍODO" na col A (ou em alguma coluna)
   for(let r=0; r<matrix.length; r++){
     for(let c=0; c<Math.min(matrix[r].length, 10); c++){
       if (normalize(matrix[r][c]) === 'periodo') return r;
@@ -97,7 +109,6 @@ function parseSheet(sheetName){
   const services = [];
   const occs = [];
 
-  // serviços: linhas após o cabeçalho até achar "OCORRÊNCIAS DO DIA" na col A
   for(let r=headerRow+1; r<matrix.length; r++){
     const a = safeStr(matrix[r][0]);
     const aNorm = normalize(a);
@@ -107,7 +118,6 @@ function parseSheet(sheetName){
     const rowIsEmpty = matrix[r].every(v => normalize(v) === '');
     if(rowIsEmpty) continue;
 
-    // considera serviço se tiver cliente e técnico (mínimo)
     const nome = safeStr(matrix[r][idx.nome]);
     const tecnico = safeStr(matrix[r][idx.tecnico]);
     if(!nome && !tecnico) continue;
@@ -135,7 +145,6 @@ function parseSheet(sheetName){
     });
   }
 
-  // ocorrências: varre tudo e pega linhas em que col A começa com "OCORRÊNCIAS DO DIA"
   for(let r=0; r<matrix.length; r++){
     const a = safeStr(matrix[r][0]);
     const aNorm = normalize(a);
@@ -144,14 +153,12 @@ function parseSheet(sheetName){
     const text = a.split(':').slice(1).join(':').trim();
     if(!text) continue;
 
-    // heurística para extrair nome do cliente (primeira parte antes de " pediu " / "----" / " - " / " reagend" etc)
     let client = text;
     const cutTokens = [' pediu ', '----', ' - ', ' reagend', ' reagenda', ' cliente ', ' nao ', ' não '];
     for(const t of cutTokens){
       const pos = normalize(client).indexOf(normalize(t));
       if(pos > 0){ client = client.slice(0, pos).trim(); break; }
     }
-    // se ainda muito grande, pega primeiras 7 palavras
     const words = client.split(/\s+/).filter(Boolean);
     if(words.length > 7) client = words.slice(0, 7).join(' ');
 
@@ -164,7 +171,6 @@ function parseSheet(sheetName){
     });
   }
 
-  // índice por clienteKey → ocorrência (primeira encontrada)
   const indexByClientKey = {};
   for(const o of occs){
     if(!indexByClientKey[o.clientKey]) indexByClientKey[o.clientKey] = o;
@@ -175,6 +181,7 @@ function parseSheet(sheetName){
 }
 
 function buildSelect(select, items, placeholder='Todos'){
+  // items pode ser array de strings OU array de {value,label}
   select.innerHTML = '';
   const opt0 = document.createElement('option');
   opt0.value = '';
@@ -183,8 +190,13 @@ function buildSelect(select, items, placeholder='Todos'){
 
   for(const it of items){
     const opt = document.createElement('option');
-    opt.value = it;
-    opt.textContent = it;
+    if(typeof it === 'object' && it){
+      opt.value = it.value ?? '';
+      opt.textContent = it.label ?? (it.value ?? '');
+    } else {
+      opt.value = it;
+      opt.textContent = it;
+    }
     select.appendChild(opt);
   }
 }
@@ -208,7 +220,6 @@ function matchOccurrenceForService(service, indexByClientKey){
   const key = normalize(service.nome);
   if(indexByClientKey[key]) return indexByClientKey[key];
 
-  // fallback: tenta “contém” entre as chaves existentes (para pequenas variações)
   const keys = Object.keys(indexByClientKey);
   for(const k of keys){
     if(!k) continue;
@@ -234,7 +245,6 @@ function computeView(){
     .filter(s => !f.periodo || normalize(s.periodo) === normalize(f.periodo))
     .filter(s => !f.q || normalize(s.nome + ' ' + s.endereco).includes(f.q));
 
-  // Report por técnico (baseado nas linhas filtradas)
   const byTech = {};
   for(const r of rows){
     const t = r.tecnico || 'SEM TÉCNICO';
@@ -253,7 +263,6 @@ function computeView(){
   const nao = total - concluidos;
   const perc = total ? Math.round((concluidos/total)*100) : 0;
 
-  // Ocorrências: só as do dia, mas se tiver filtros, mostra só as que batem com clientes visíveis
   const visibleClientKeys = new Set(rows.map(r=>normalize(r.nome)));
   const occsView = occs.filter(o=>{
     if(!o.clientKey) return true;
@@ -269,7 +278,6 @@ function computeView(){
 function render(){
   const view = computeView();
 
-  // KPIs
   const kpiEls = els.kpis.querySelectorAll('.kpiValue');
   if(view.kpi){
     kpiEls[0].textContent = view.kpi.total;
@@ -280,7 +288,6 @@ function render(){
     kpiEls.forEach(el=>el.textContent='—');
   }
 
-  // Services table
   const head = els.servicesTable.querySelector('thead');
   const body = els.servicesTable.querySelector('tbody');
   head.innerHTML = '<tr>' + [
@@ -311,7 +318,6 @@ function render(){
     body.appendChild(tr);
   }
 
-  // click occurrences
   body.querySelectorAll('a[data-occ]').forEach(a=>{
     a.addEventListener('click', (e)=>{
       e.preventDefault();
@@ -320,7 +326,6 @@ function render(){
     });
   });
 
-  // Occ list
   els.occList.innerHTML = '';
   if(view.occs.length === 0){
     const li = document.createElement('li');
@@ -339,7 +344,6 @@ function render(){
     }
   }
 
-  // Report table
   const rHead = els.reportTable.querySelector('thead');
   const rBody = els.reportTable.querySelector('tbody');
   rHead.innerHTML = '<tr>' + ['Técnico','Total','Concluídos','Não concluídos','%'].map(h=>`<th>${h}</th>`).join('') + '</tr>';
@@ -356,7 +360,8 @@ function render(){
     rBody.appendChild(tr);
   }
 
-  els.exportBtn.disabled = !(WB && els.daySelect.value);
+  els.exportPdfBtn.disabled = !(WB && els.daySelect.value);
+  els.exportXlsxBtn.disabled = !(WB && els.daySelect.value);
 }
 
 function showOccModal(text){
@@ -392,11 +397,13 @@ function closeOccModal(){
   if(modal) modal.style.display='none';
 }
 
-function exportReport(){
+function exportXlsx(){
   const view = computeView();
   if(!view.kpi) return;
 
-  const day = els.daySelect.value.trim();
+  const dayRaw = els.daySelect.value.trim();
+  const day = formatBRDate(dayRaw);
+
   const rows = view.rows.map(r=>({
     Dia: day,
     Periodo: r.periodo,
@@ -425,15 +432,79 @@ function exportReport(){
   XLSX.utils.book_append_sheet(wb, ws1, 'SERVICOS_FILTRADOS');
   XLSX.utils.book_append_sheet(wb, ws2, 'RELATORIO_TECNICOS');
 
-  XLSX.writeFile(wb, `relatorio_${day}.xlsx`);
+  XLSX.writeFile(wb, `relatorio_${dayRaw}.xlsx`);
 }
 
-els.exportBtn.addEventListener('click', exportReport);
+function exportPDF(){
+  const view = computeView();
+  if(!view.kpi) return;
+
+  const dayRaw = els.daySelect.value.trim();
+  const day = formatBRDate(dayRaw);
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(16);
+  doc.text('Telecom Relatórios', 40, 52);
+
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(11);
+  doc.text(`Relatório do dia: ${day}`, 40, 74);
+
+  const k = view.kpi;
+  doc.text(`Total: ${k.total}   Concluídos: ${k.concluidos}   Não concluídos: ${k.nao}   % Conclusão: ${k.perc}%`, 40, 96);
+
+  doc.setFont('helvetica','bold');
+  doc.text('Resumo por técnico', 40, 126);
+
+  const reportRows = view.report.map(x => [x.tecnico, String(x.total), String(x.concluidos), String(x.nao_concluidos), String(x.perc) + '%']);
+  doc.autoTable({
+    startY: 140,
+    head: [['Técnico','Total','Concluídos','Não concluídos','%']],
+    body: reportRows,
+    styles: { font: 'helvetica', fontSize: 10, cellPadding: 6 },
+    headStyles: { fillColor: [24, 34, 66] },
+    margin: { left: 40, right: 40 }
+  });
+
+  const start = doc.lastAutoTable.finalY + 18;
+  doc.setFont('helvetica','bold');
+  doc.text('Serviços (filtrados)', 40, start);
+
+  const svcRows = view.rows.slice(0, 180).map(r => ([
+    safeStr(r.periodo),
+    safeStr(r.tecnico),
+    safeStr(r.motivo),
+    safeStr(r.nome),
+    (r.status==='concluido'?'Concluído':'Não concluído')
+  ]));
+
+  doc.autoTable({
+    startY: start + 14,
+    head: [['Período','Técnico','Motivo','Cliente','Status']],
+    body: svcRows,
+    styles: { font: 'helvetica', fontSize: 9, cellPadding: 5 },
+    headStyles: { fillColor: [24, 34, 66] },
+    margin: { left: 40, right: 40 },
+    didDrawPage: () => {
+      const page = doc.getNumberOfPages();
+      doc.setFontSize(9);
+      doc.setFont('helvetica','normal');
+      doc.text(`Página ${page}`, doc.internal.pageSize.getWidth()-80, doc.internal.pageSize.getHeight()-24);
+    }
+  });
+
+  doc.save(`relatorio_${dayRaw}.pdf`);
+}
+
+els.exportPdfBtn.addEventListener('click', exportPDF);
+els.exportXlsxBtn.addEventListener('click', exportXlsx);
 
 function wireFilters(){
   ['daySelect','techSelect','motivoSelect','periodoSelect'].forEach(id=>{
     els[id].addEventListener('change', ()=>{
-      // ao trocar o dia, repopula filtros
       if(id==='daySelect') refreshFiltersForDay();
       render();
     });
@@ -470,10 +541,9 @@ els.fileInput.addEventListener('change', async (e)=>{
   }
 
   els.hint.textContent = `Planilha carregada: ${file.name} • ${days.length} dias detectados`;
-  buildSelect(els.daySelect, days, 'Selecione o dia');
+  buildSelect(els.daySelect, days.map(d=>({value:d,label:formatBRDate(d)})), 'Selecione o dia');
   setDisabled(false);
 
-  // auto seleciona o primeiro dia
   els.daySelect.value = days[0];
   refreshFiltersForDay();
   render();
