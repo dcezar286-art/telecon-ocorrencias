@@ -1,3 +1,7 @@
+// Telecom Relatórios - Leitor de Excel + filtros + relatório + export PDF/XLSX
+// Compatível com planilhas onde cada DIA é uma aba (ex: 01022026) e existem linhas "OCORRÊNCIAS DO DIA : ..."
+// Lê também REPAROS (mesmo se estiverem abaixo do bloco de ocorrências)
+
 const els = {
   fileInput: document.getElementById('fileInput'),
   exportPdfBtn: document.getElementById('exportPdfBtn'),
@@ -15,7 +19,7 @@ const els = {
 };
 
 let WB = null;
-let CACHE = {};
+let CACHE = {}; // {sheetName: {services, occs, indexByClientKey}}
 
 const normalize = (v) => {
   if (v === null || v === undefined) return '';
@@ -50,17 +54,22 @@ function setDisabled(disabled){
 }
 
 function isDateSheet(name){
+  // aceita "01022026" com/sem espaços
   return /^\s*\d{8}\s*$/.test(name);
 }
 
 function sheetToMatrix(ws){
+  // raw:false para preservar formatação (strings)
   return XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
 }
 
 function findHeaderRow(matrix){
+  // procura a linha que contém "PERÍODO" (ou variação) em alguma coluna
   for(let r=0; r<matrix.length; r++){
-    for(let c=0; c<Math.min(matrix[r].length, 12); c++){
-      if (normalize(matrix[r][c]) === 'periodo') return r;
+    const row = matrix[r] || [];
+    for(let c=0; c<Math.min(row.length, 20); c++){
+      const cell = normalize(row[c]);
+      if(cell === 'periodo' || cell.includes('periodo')) return r;
     }
   }
   return -1;
@@ -78,85 +87,103 @@ function parseSheet(sheetName){
     return CACHE[sheetName];
   }
 
-  const headers = matrix[headerRow].map(h => normalize(h));
-  const col = (name) => headers.indexOf(normalize(name));
+  const headers = (matrix[headerRow] || []).map(h => normalize(h));
+
+  function findColLike(...needles){
+    for(let i=0; i<headers.length; i++){
+      const h = headers[i] || '';
+      for(const n of needles){
+        const nn = normalize(n);
+        if(nn && h.includes(nn)) return i;
+      }
+    }
+    return -1;
+  }
 
   const idx = {
-    periodo: col('PERÍODO'),
-    confirmacoes: col('CONFIRMAÇÕES'),
-    motivo: col('MOTIVO'),
-    tecnico: col('TECNICO'),
-    nome: col('NOME'),
-    endereco: col('ENDEREÇO'),
-    telefone: col('TELEFONE'),
-    cpf: col('CPF'),
-    rg: col('RG'),
-    dtnasc: col('DT.NASC'),
-    plano: col('PLANO'),
-    vencimento: col('VENCIMENTO'),
-    taxa: col('TAXA R$'),
-    pagto: col('PAGTO'),
-    boleto: col('BOLETO'),
-    login: col('LOGIN/SENHA'),
-    atendente: col('ATENDENTE'),
-    obs: col('OBSERVAÇÃO'),
+    periodo: findColLike('periodo','horario','janela','turno'),
+    confirmacoes: findColLike('confirm','confirma'),
+    motivo: findColLike('motivo','tipo','servico','serviço'),
+    tecnico: findColLike('tecnico','técnico','tec'),
+    nome: findColLike('nome','cliente','assinante'),
+    endereco: findColLike('endereco','endereço','end.','logradouro','rua'),
+    telefone: findColLike('telefone','tel','cel','contato'),
+    cpf: findColLike('cpf'),
+    rg: findColLike('rg'),
+    dtnasc: findColLike('dt.nasc','nasc'),
+    plano: findColLike('plano'),
+    vencimento: findColLike('venc'),
+    taxa: findColLike('taxa'),
+    pagto: findColLike('pagto','pagamento'),
+    boleto: findColLike('boleto'),
+    login: findColLike('login','senha'),
+    atendente: findColLike('atendente'),
+    obs: findColLike('observ','obs'),
   };
+
+  // não mostra frase na apresentação
+  if(els.hint) els.hint.textContent = '';
 
   const services = [];
   const occs = [];
 
-  // ✅ LEITURA DOS SERVIÇOS EM TODA A ABA (inclui reparos)
+  // ✅ Lê serviços no restante da aba inteira (inclui reparos)
   for(let r=headerRow+1; r<matrix.length; r++){
-    const a = safeStr(matrix[r][0]);
+    const row = matrix[r] || [];
+    const a = safeStr(row[0]);
     const aNorm = normalize(a);
 
-    // pula ocorrências (não interrompe a leitura)
+    // pula as linhas de ocorrência (mas não para a leitura)
     if(aNorm.startsWith('ocorrencias do dia')) continue;
 
-    const rowIsEmpty = matrix[r].every(v => normalize(v) === '');
+    // pula linhas vazias
+    const rowIsEmpty = row.every(v => normalize(v) === '');
     if(rowIsEmpty) continue;
 
-    const nome = safeStr(matrix[r][idx.nome]);
-    const tecnico = safeStr(matrix[r][idx.tecnico]);
-    const motivo = safeStr(matrix[r][idx.motivo]);
+    const nome = idx.nome >= 0 ? safeStr(row[idx.nome]) : '';
+    const tecnico = idx.tecnico >= 0 ? safeStr(row[idx.tecnico]) : '';
+    const motivo = idx.motivo >= 0 ? safeStr(row[idx.motivo]) : '';
 
-    // evita capturar linhas de "título"
-    if(!tecnico || !nome) continue;
+    // ✅ regra flexível: precisa ter NOME e (TÉCNICO ou MOTIVO)
+    if(!nome) continue;
+    if(!tecnico && !motivo) continue;
 
     services.push({
       sheet: sheetName,
-      periodo: safeStr(matrix[r][idx.periodo]),
-      confirmacoes: safeStr(matrix[r][idx.confirmacoes]),
+      periodo: idx.periodo >= 0 ? safeStr(row[idx.periodo]) : '',
+      confirmacoes: idx.confirmacoes >= 0 ? safeStr(row[idx.confirmacoes]) : '',
       motivo,
       tecnico,
       nome,
-      endereco: safeStr(matrix[r][idx.endereco]),
-      telefone: safeStr(matrix[r][idx.telefone]),
-      cpf: safeStr(matrix[r][idx.cpf]),
-      rg: safeStr(matrix[r][idx.rg]),
-      dtnasc: safeStr(matrix[r][idx.dtnasc]),
-      plano: safeStr(matrix[r][idx.plano]),
-      vencimento: safeStr(matrix[r][idx.vencimento]),
-      taxa: safeStr(matrix[r][idx.taxa]),
-      pagto: safeStr(matrix[r][idx.pagto]),
-      boleto: safeStr(matrix[r][idx.boleto]),
-      login: safeStr(matrix[r][idx.login]),
-      atendente: safeStr(matrix[r][idx.atendente]),
-      obs: safeStr(matrix[r][idx.obs]),
+      endereco: idx.endereco >= 0 ? safeStr(row[idx.endereco]) : '',
+      telefone: idx.telefone >= 0 ? safeStr(row[idx.telefone]) : '',
+      cpf: idx.cpf >= 0 ? safeStr(row[idx.cpf]) : '',
+      rg: idx.rg >= 0 ? safeStr(row[idx.rg]) : '',
+      dtnasc: idx.dtnasc >= 0 ? safeStr(row[idx.dtnasc]) : '',
+      plano: idx.plano >= 0 ? safeStr(row[idx.plano]) : '',
+      vencimento: idx.vencimento >= 0 ? safeStr(row[idx.vencimento]) : '',
+      taxa: idx.taxa >= 0 ? safeStr(row[idx.taxa]) : '',
+      pagto: idx.pagto >= 0 ? safeStr(row[idx.pagto]) : '',
+      boleto: idx.boleto >= 0 ? safeStr(row[idx.boleto]) : '',
+      login: idx.login >= 0 ? safeStr(row[idx.login]) : '',
+      atendente: idx.atendente >= 0 ? safeStr(row[idx.atendente]) : '',
+      obs: idx.obs >= 0 ? safeStr(row[idx.obs]) : '',
     });
   }
 
-  // ocorrências
+  // Lê ocorrências (em qualquer posição da aba)
   for(let r=0; r<matrix.length; r++){
-    const a = safeStr(matrix[r][0]);
+    const row = matrix[r] || [];
+    const a = safeStr(row[0]);
     const aNorm = normalize(a);
     if(!aNorm.startsWith('ocorrencias do dia')) continue;
 
     const text = a.split(':').slice(1).join(':').trim();
     if(!text) continue;
 
+    // tenta pegar o nome do cliente no começo
     let client = text;
-    const cutTokens = [' pediu ', '----', ' - ', ' reagend', ' reagenda', ' cliente ', ' nao ', ' não '];
+    const cutTokens = [' pediu ', '----', ' - ', ' reagend', ' reagenda', ' cliente ', ' nao ', ' não ', ' tecnico ', ' técnico '];
     for(const t of cutTokens){
       const pos = normalize(client).indexOf(normalize(t));
       if(pos > 0){ client = client.slice(0, pos).trim(); break; }
@@ -172,9 +199,10 @@ function parseSheet(sheetName){
     });
   }
 
+  // index por nome
   const indexByClientKey = {};
   for(const o of occs){
-    if(!indexByClientKey[o.clientKey]) indexByClientKey[o.clientKey] = o;
+    if(o.clientKey && !indexByClientKey[o.clientKey]) indexByClientKey[o.clientKey] = o;
   }
 
   CACHE[sheetName] = { services, occs, indexByClientKey };
@@ -220,6 +248,7 @@ function matchOccurrenceForService(service, indexByClientKey){
   const key = normalize(service.nome);
   if(indexByClientKey[key]) return indexByClientKey[key];
 
+  // fallback por “contém”
   const keys = Object.keys(indexByClientKey);
   for(const k of keys){
     if(!k) continue;
@@ -243,8 +272,9 @@ function computeView(){
     .filter(s => !f.tech || s.tecnico === f.tech)
     .filter(s => !f.motivo || normalize(s.motivo) === normalize(f.motivo))
     .filter(s => !f.periodo || normalize(s.periodo) === normalize(f.periodo))
-    .filter(s => !f.q || normalize(s.nome + ' ' + s.endereco).includes(f.q));
+    .filter(s => !f.q || normalize(`${s.nome} ${s.endereco}`).includes(f.q));
 
+  // relatório por técnico
   const byTech = {};
   for(const r of rows){
     const t = r.tecnico || 'SEM TÉCNICO';
@@ -253,6 +283,7 @@ function computeView(){
     if(r.status === 'concluido') byTech[t].concluidos++;
     else byTech[t].nao_concluidos++;
   }
+
   const report = Object.values(byTech).map(x => ({
     ...x,
     perc: x.total ? Math.round((x.concluidos/x.total)*100) : 0
@@ -263,12 +294,49 @@ function computeView(){
   const nao = total - concluidos;
   const perc = total ? Math.round((concluidos/total)*100) : 0;
 
-  return { rows, occs, report, kpi: { total, concluidos, nao, perc } };
+  // ocorrências visíveis (apenas do dia filtrado)
+  const occsView = occs;
+
+  return { rows, occs: occsView, report, kpi: { total, concluidos, nao, perc } };
+}
+
+function showOccModal(text){
+  let modal = document.getElementById('occModal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'occModal';
+    modal.style.position='fixed';
+    modal.style.inset='0';
+    modal.style.background='rgba(0,0,0,.55)';
+    modal.style.display='grid';
+    modal.style.placeItems='center';
+    modal.style.padding='14px';
+    modal.style.zIndex='1000';
+    modal.innerHTML = `
+      <div style="max-width:720px;width:100%; background: rgba(18,26,51,.98); border:1px solid rgba(255,255,255,.10); border-radius:18px; box-shadow: 0 18px 45px rgba(0,0,0,.5); padding:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+          <div style="font-weight:900;">Ocorrência</div>
+          <button id="occClose" class="btn secondary" style="padding:8px 10px;border-radius:12px;">Fechar</button>
+        </div>
+        <div id="occText" style="margin-top:10px;color:#9fb0da;line-height:1.45; white-space:pre-wrap;"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e)=>{ if(e.target === modal) closeOccModal(); });
+    modal.querySelector('#occClose').addEventListener('click', closeOccModal);
+  }
+  modal.querySelector('#occText').textContent = text || '';
+  modal.style.display='grid';
+}
+function closeOccModal(){
+  const modal = document.getElementById('occModal');
+  if(modal) modal.style.display='none';
 }
 
 function render(){
   const view = computeView();
 
+  // KPIs
   const kpiEls = els.kpis.querySelectorAll('.kpiValue');
   if(view.kpi){
     kpiEls[0].textContent = view.kpi.total;
@@ -279,10 +347,13 @@ function render(){
     kpiEls.forEach(el=>el.textContent='—');
   }
 
+  // Serviços
   const head = els.servicesTable.querySelector('thead');
   const body = els.servicesTable.querySelector('tbody');
-  head.innerHTML = '<tr>' + ['Período','Técnico','Motivo','Cliente','Endereço','Telefone','Status','Ocorrência']
-    .map(h=>`<th>${h}</th>`).join('') + '</tr>';
+
+  head.innerHTML = '<tr>' + [
+    'Período','Técnico','Motivo','Cliente','Endereço','Telefone','Status','Ocorrência'
+  ].map(h=>`<th>${h}</th>`).join('') + '</tr>';
 
   body.innerHTML = '';
   for(const r of view.rows){
@@ -312,14 +383,36 @@ function render(){
     a.addEventListener('click', (e)=>{
       e.preventDefault();
       const text = decodeURIComponent(a.getAttribute('data-occ') || '');
-      alert(text);
+      showOccModal(text);
     });
   });
 
+  // Ocorrências
+  els.occList.innerHTML = '';
+  if(view.occs.length === 0){
+    const li = document.createElement('li');
+    li.className = 'occItem';
+    li.innerHTML = '<div class="occTitle">Sem ocorrências</div><div class="occText"></div>';
+    els.occList.appendChild(li);
+  } else {
+    for(const o of view.occs){
+      const li = document.createElement('li');
+      li.className = 'occItem';
+      li.innerHTML = `
+        <div class="occTitle">${safeStr(o.clientGuess || 'Ocorrência')}</div>
+        <div class="occText">${safeStr(o.text)}</div>
+      `;
+      els.occList.appendChild(li);
+    }
+  }
+
+  // Relatório
   const rHead = els.reportTable.querySelector('thead');
   const rBody = els.reportTable.querySelector('tbody');
-  rHead.innerHTML = '<tr>' + ['Técnico','Total','Concluídos','Não concluídos','%'].map(h=>`<th>${h}</th>`).join('') + '</tr>';
+  rHead.innerHTML = '<tr>' + ['Técnico','Total','Concluídos','Não concluídos','%']
+    .map(h=>`<th>${h}</th>`).join('') + '</tr>';
   rBody.innerHTML = '';
+
   for(const x of view.report){
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -339,6 +432,7 @@ function render(){
 function refreshFiltersForDay(){
   const day = els.daySelect.value;
   if(!day) return;
+
   const { services } = parseSheet(day);
 
   buildSelect(els.techSelect, uniqSorted(services.map(s=>s.tecnico)), 'Todos os técnicos');
@@ -415,6 +509,28 @@ function exportPDF(){
     margin: { left: 40, right: 40 }
   });
 
+  // lista resumida de serviços (primeiros 200)
+  const start = doc.lastAutoTable.finalY + 18;
+  doc.setFont('helvetica','bold');
+  doc.text('Serviços (filtrados)', 40, start);
+
+  const svcRows = view.rows.slice(0, 200).map(r => ([
+    safeStr(r.periodo),
+    safeStr(r.tecnico),
+    safeStr(r.motivo),
+    safeStr(r.nome),
+    (r.status==='concluido'?'Concluído':'Não concluído')
+  ]));
+
+  doc.autoTable({
+    startY: start + 14,
+    head: [['Período','Técnico','Motivo','Cliente','Status']],
+    body: svcRows,
+    styles: { font: 'helvetica', fontSize: 9, cellPadding: 5 },
+    headStyles: { fillColor: [24, 34, 66] },
+    margin: { left: 40, right: 40 }
+  });
+
   doc.save(`relatorio_${dayRaw}.pdf`);
 }
 
@@ -423,7 +539,7 @@ els.exportXlsxBtn.addEventListener('click', exportXlsx);
 
 ['daySelect','techSelect','motivoSelect','periodoSelect'].forEach(id=>{
   els[id].addEventListener('change', ()=>{
-    if(id==='daySelect') refreshFiltersForDay();
+    if(id === 'daySelect') refreshFiltersForDay();
     render();
   });
 });
@@ -437,17 +553,29 @@ els.fileInput.addEventListener('change', async (e)=>{
   WB = XLSX.read(buf, { type: 'array' });
   CACHE = {};
 
-  const days = WB.SheetNames.filter(isDateSheet).map(s=>s.trim()).sort((a,b)=>a.localeCompare(b));
+  const days = WB.SheetNames
+    .filter(isDateSheet)
+    .map(s=>s.trim())
+    .sort((a,b)=>a.localeCompare(b));
+
   if(days.length === 0){
-    els.hint.textContent = '';
+    if(els.hint) els.hint.textContent = '';
     setDisabled(true);
+    render();
     return;
   }
 
-  els.hint.textContent = '';
-  buildSelect(els.daySelect, days.map(d=>({value:d,label:formatBRDate(d)})), 'Selecione o dia');
+  if(els.hint) els.hint.textContent = '';
+
+  buildSelect(
+    els.daySelect,
+    days.map(d => ({ value: d, label: formatBRDate(d) })),
+    'Selecione o dia'
+  );
+
   setDisabled(false);
 
+  // seleciona o primeiro dia
   els.daySelect.value = days[0];
   refreshFiltersForDay();
   render();
