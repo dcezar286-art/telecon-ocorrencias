@@ -109,41 +109,49 @@ function parseSheet(sheetName){
   const services = [];
   const occs = [];
 
-  for(let r=headerRow+1; r<matrix.length; r++){
-    const a = safeStr(matrix[r][0]);
-    const aNorm = normalize(a);
+  // serviços: percorre a aba inteira (instalações + reparos + outros blocos)
+// e apenas IGNORA as linhas de "OCORRÊNCIAS DO DIA"
+for(let r=headerRow+1; r<matrix.length; r++){
+  const a = safeStr(matrix[r][0]);
+  const aNorm = normalize(a);
 
-    if(aNorm.startsWith('ocorrencias do dia')) break;
+  // pula ocorrências (não interrompe a leitura)
+  if(aNorm.startsWith('ocorrencias do dia')) continue;
 
-    const rowIsEmpty = matrix[r].every(v => normalize(v) === '');
-    if(rowIsEmpty) continue;
+  const rowIsEmpty = matrix[r].every(v => normalize(v) === '');
+  if(rowIsEmpty) continue;
 
-    const nome = safeStr(matrix[r][idx.nome]);
-    const tecnico = safeStr(matrix[r][idx.tecnico]);
-    if(!nome && !tecnico) continue;
+  const nome = safeStr(matrix[r][idx.nome]);
+  const tecnico = safeStr(matrix[r][idx.tecnico]);
+  const motivo = safeStr(matrix[r][idx.motivo]);
 
-    services.push({
-      sheet: sheetName,
-      periodo: safeStr(matrix[r][idx.periodo]),
-      confirmacoes: safeStr(matrix[r][idx.confirmacoes]),
-      motivo: safeStr(matrix[r][idx.motivo]),
-      tecnico,
-      nome,
-      endereco: safeStr(matrix[r][idx.endereco]),
-      telefone: safeStr(matrix[r][idx.telefone]),
-      cpf: safeStr(matrix[r][idx.cpf]),
-      rg: safeStr(matrix[r][idx.rg]),
-      dtnasc: safeStr(matrix[r][idx.dtnasc]),
-      plano: safeStr(matrix[r][idx.plano]),
-      vencimento: safeStr(matrix[r][idx.vencimento]),
-      taxa: safeStr(matrix[r][idx.taxa]),
-      pagto: safeStr(matrix[r][idx.pagto]),
-      boleto: safeStr(matrix[r][idx.boleto]),
-      login: safeStr(matrix[r][idx.login]),
-      atendente: safeStr(matrix[r][idx.atendente]),
-      obs: safeStr(matrix[r][idx.obs]),
-    });
-  }
+  // evita pegar linhas “título” tipo "AGENDAMENTO DE REPAROS..."
+  // regra: só vira serviço se tiver técnico + cliente (nome)
+  if(!tecnico || !nome) continue;
+
+  services.push({
+    sheet: sheetName,
+    periodo: safeStr(matrix[r][idx.periodo]),
+    confirmacoes: safeStr(matrix[r][idx.confirmacoes]),
+    motivo,
+    tecnico,
+    nome,
+    endereco: safeStr(matrix[r][idx.endereco]),
+    telefone: safeStr(matrix[r][idx.telefone]),
+    cpf: safeStr(matrix[r][idx.cpf]),
+    rg: safeStr(matrix[r][idx.rg]),
+    dtnasc: safeStr(matrix[r][idx.dtnasc]),
+    plano: safeStr(matrix[r][idx.plano]),
+    vencimento: safeStr(matrix[r][idx.vencimento]),
+    taxa: safeStr(matrix[r][idx.taxa]),
+    pagto: safeStr(matrix[r][idx.pagto]),
+    boleto: safeStr(matrix[r][idx.boleto]),
+    login: safeStr(matrix[r][idx.login]),
+    atendente: safeStr(matrix[r][idx.atendente]),
+    obs: safeStr(matrix[r][idx.obs]),
+  });
+}
+
 
   for(let r=0; r<matrix.length; r++){
     const a = safeStr(matrix[r][0]);
