@@ -1,6 +1,3 @@
-// Telecom Relatórios - Excel filter + report (SheetJS)
-// Padrão: abas por dia (nome como 29042025 etc), tabela com cabeçalho "PERÍODO" e linhas de ocorrência "OCORRÊNCIAS DO DIA : ..."
-
 const els = {
   fileInput: document.getElementById('fileInput'),
   exportPdfBtn: document.getElementById('exportPdfBtn'),
@@ -18,7 +15,7 @@ const els = {
 };
 
 let WB = null;
-let CACHE = {}; // {sheetName: {services:[], occs:[], indexByClientKey:{...}}}
+let CACHE = {};
 
 const normalize = (v) => {
   if (v === null || v === undefined) return '';
@@ -31,7 +28,6 @@ const normalize = (v) => {
 
 const safeStr = (v) => (v === null || v === undefined) ? '' : String(v).trim();
 
-// Converte 'ddmmaaaa' -> 'dd/mm/aaaa' quando fizer sentido
 function formatBRDate(v){
   const s = safeStr(v);
   if(/^\d{8}$/.test(s)){
@@ -63,7 +59,7 @@ function sheetToMatrix(ws){
 
 function findHeaderRow(matrix){
   for(let r=0; r<matrix.length; r++){
-    for(let c=0; c<Math.min(matrix[r].length, 10); c++){
+    for(let c=0; c<Math.min(matrix[r].length, 12); c++){
       if (normalize(matrix[r][c]) === 'periodo') return r;
     }
   }
@@ -109,50 +105,48 @@ function parseSheet(sheetName){
   const services = [];
   const occs = [];
 
-  // serviços: percorre a aba inteira (instalações + reparos + outros blocos)
-// e apenas IGNORA as linhas de "OCORRÊNCIAS DO DIA"
-for(let r=headerRow+1; r<matrix.length; r++){
-  const a = safeStr(matrix[r][0]);
-  const aNorm = normalize(a);
+  // ✅ LEITURA DOS SERVIÇOS EM TODA A ABA (inclui reparos)
+  for(let r=headerRow+1; r<matrix.length; r++){
+    const a = safeStr(matrix[r][0]);
+    const aNorm = normalize(a);
 
-  // pula ocorrências (não interrompe a leitura)
-  if(aNorm.startsWith('ocorrencias do dia')) continue;
+    // pula ocorrências (não interrompe a leitura)
+    if(aNorm.startsWith('ocorrencias do dia')) continue;
 
-  const rowIsEmpty = matrix[r].every(v => normalize(v) === '');
-  if(rowIsEmpty) continue;
+    const rowIsEmpty = matrix[r].every(v => normalize(v) === '');
+    if(rowIsEmpty) continue;
 
-  const nome = safeStr(matrix[r][idx.nome]);
-  const tecnico = safeStr(matrix[r][idx.tecnico]);
-  const motivo = safeStr(matrix[r][idx.motivo]);
+    const nome = safeStr(matrix[r][idx.nome]);
+    const tecnico = safeStr(matrix[r][idx.tecnico]);
+    const motivo = safeStr(matrix[r][idx.motivo]);
 
-  // evita pegar linhas “título” tipo "AGENDAMENTO DE REPAROS..."
-  // regra: só vira serviço se tiver técnico + cliente (nome)
-  if(!tecnico || !nome) continue;
+    // evita capturar linhas de "título"
+    if(!tecnico || !nome) continue;
 
-  services.push({
-    sheet: sheetName,
-    periodo: safeStr(matrix[r][idx.periodo]),
-    confirmacoes: safeStr(matrix[r][idx.confirmacoes]),
-    motivo,
-    tecnico,
-    nome,
-    endereco: safeStr(matrix[r][idx.endereco]),
-    telefone: safeStr(matrix[r][idx.telefone]),
-    cpf: safeStr(matrix[r][idx.cpf]),
-    rg: safeStr(matrix[r][idx.rg]),
-    dtnasc: safeStr(matrix[r][idx.dtnasc]),
-    plano: safeStr(matrix[r][idx.plano]),
-    vencimento: safeStr(matrix[r][idx.vencimento]),
-    taxa: safeStr(matrix[r][idx.taxa]),
-    pagto: safeStr(matrix[r][idx.pagto]),
-    boleto: safeStr(matrix[r][idx.boleto]),
-    login: safeStr(matrix[r][idx.login]),
-    atendente: safeStr(matrix[r][idx.atendente]),
-    obs: safeStr(matrix[r][idx.obs]),
-  });
-}
+    services.push({
+      sheet: sheetName,
+      periodo: safeStr(matrix[r][idx.periodo]),
+      confirmacoes: safeStr(matrix[r][idx.confirmacoes]),
+      motivo,
+      tecnico,
+      nome,
+      endereco: safeStr(matrix[r][idx.endereco]),
+      telefone: safeStr(matrix[r][idx.telefone]),
+      cpf: safeStr(matrix[r][idx.cpf]),
+      rg: safeStr(matrix[r][idx.rg]),
+      dtnasc: safeStr(matrix[r][idx.dtnasc]),
+      plano: safeStr(matrix[r][idx.plano]),
+      vencimento: safeStr(matrix[r][idx.vencimento]),
+      taxa: safeStr(matrix[r][idx.taxa]),
+      pagto: safeStr(matrix[r][idx.pagto]),
+      boleto: safeStr(matrix[r][idx.boleto]),
+      login: safeStr(matrix[r][idx.login]),
+      atendente: safeStr(matrix[r][idx.atendente]),
+      obs: safeStr(matrix[r][idx.obs]),
+    });
+  }
 
-
+  // ocorrências
   for(let r=0; r<matrix.length; r++){
     const a = safeStr(matrix[r][0]);
     const aNorm = normalize(a);
@@ -175,7 +169,6 @@ for(let r=headerRow+1; r<matrix.length; r++){
       clientGuess: client,
       clientKey: normalize(client),
       text,
-      raw: a
     });
   }
 
@@ -189,7 +182,6 @@ for(let r=headerRow+1; r<matrix.length; r++){
 }
 
 function buildSelect(select, items, placeholder='Todos'){
-  // items pode ser array de strings OU array de {value,label}
   select.innerHTML = '';
   const opt0 = document.createElement('option');
   opt0.value = '';
@@ -271,16 +263,7 @@ function computeView(){
   const nao = total - concluidos;
   const perc = total ? Math.round((concluidos/total)*100) : 0;
 
-  const visibleClientKeys = new Set(rows.map(r=>normalize(r.nome)));
-  const occsView = occs.filter(o=>{
-    if(!o.clientKey) return true;
-    for(const k of visibleClientKeys){
-      if(k.includes(o.clientKey) || o.clientKey.includes(k)) return true;
-    }
-    return false;
-  });
-
-  return { rows, occs: occsView, report, kpi: { total, concluidos, nao, perc } };
+  return { rows, occs, report, kpi: { total, concluidos, nao, perc } };
 }
 
 function render(){
@@ -298,9 +281,8 @@ function render(){
 
   const head = els.servicesTable.querySelector('thead');
   const body = els.servicesTable.querySelector('tbody');
-  head.innerHTML = '<tr>' + [
-    'Período','Técnico','Motivo','Cliente','Endereço','Telefone','Status','Motivo (ocorrência)'
-  ].map(h=>`<th>${h}</th>`).join('') + '</tr>';
+  head.innerHTML = '<tr>' + ['Período','Técnico','Motivo','Cliente','Endereço','Telefone','Status','Ocorrência']
+    .map(h=>`<th>${h}</th>`).join('') + '</tr>';
 
   body.innerHTML = '';
   for(const r of view.rows){
@@ -330,27 +312,9 @@ function render(){
     a.addEventListener('click', (e)=>{
       e.preventDefault();
       const text = decodeURIComponent(a.getAttribute('data-occ') || '');
-      showOccModal(text);
+      alert(text);
     });
   });
-
-  els.occList.innerHTML = '';
-  if(view.occs.length === 0){
-    const li = document.createElement('li');
-    li.className = 'occItem';
-    li.innerHTML = '<div class="occTitle">Sem ocorrências</div><div class="occText">Nada registrado para esse filtro/dia.</div>';
-    els.occList.appendChild(li);
-  } else {
-    for(const o of view.occs){
-      const li = document.createElement('li');
-      li.className = 'occItem';
-      li.innerHTML = `
-        <div class="occTitle">${safeStr(o.clientGuess || 'Ocorrência')}</div>
-        <div class="occText">${safeStr(o.text)}</div>
-      `;
-      els.occList.appendChild(li);
-    }
-  }
 
   const rHead = els.reportTable.querySelector('thead');
   const rBody = els.reportTable.querySelector('tbody');
@@ -372,37 +336,15 @@ function render(){
   els.exportXlsxBtn.disabled = !(WB && els.daySelect.value);
 }
 
-function showOccModal(text){
-  let modal = document.getElementById('occModal');
-  if(!modal){
-    modal = document.createElement('div');
-    modal.id = 'occModal';
-    modal.style.position='fixed';
-    modal.style.inset='0';
-    modal.style.background='rgba(0,0,0,.55)';
-    modal.style.display='grid';
-    modal.style.placeItems='center';
-    modal.style.padding='14px';
-    modal.style.zIndex='1000';
-    modal.innerHTML = `
-      <div style="max-width:720px;width:100%; background: rgba(18,26,51,.98); border:1px solid rgba(255,255,255,.10); border-radius:18px; box-shadow: 0 18px 45px rgba(0,0,0,.5); padding:14px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
-          <div style="font-weight:900;">Detalhe da ocorrência</div>
-          <button id="occClose" class="btn secondary" style="padding:8px 10px;border-radius:12px;">Fechar</button>
-        </div>
-        <div id="occText" style="margin-top:10px;color:#9fb0da;line-height:1.45; white-space:pre-wrap;"></div>
-      </div>
-    `;
-    document.body.appendChild(modal);
-    modal.addEventListener('click', (e)=>{ if(e.target === modal) closeOccModal(); });
-    modal.querySelector('#occClose').addEventListener('click', closeOccModal);
-  }
-  modal.querySelector('#occText').textContent = text || '';
-  modal.style.display='grid';
-}
-function closeOccModal(){
-  const modal = document.getElementById('occModal');
-  if(modal) modal.style.display='none';
+function refreshFiltersForDay(){
+  const day = els.daySelect.value;
+  if(!day) return;
+  const { services } = parseSheet(day);
+
+  buildSelect(els.techSelect, uniqSorted(services.map(s=>s.tecnico)), 'Todos os técnicos');
+  buildSelect(els.motivoSelect, uniqSorted(services.map(s=>s.motivo)), 'Todos os tipos');
+  buildSelect(els.periodoSelect, uniqSorted(services.map(s=>s.periodo)), 'Todos os períodos');
+  els.searchInput.value = '';
 }
 
 function exportXlsx(){
@@ -416,7 +358,7 @@ function exportXlsx(){
     Dia: day,
     Periodo: r.periodo,
     Tecnico: r.tecnico,
-    Motivo: r.motivo,
+    Tipo: r.motivo,
     Cliente: r.nome,
     Endereco: r.endereco,
     Telefone: r.telefone,
@@ -434,12 +376,8 @@ function exportXlsx(){
   }));
 
   const wb = XLSX.utils.book_new();
-  const ws1 = XLSX.utils.json_to_sheet(rows);
-  const ws2 = XLSX.utils.json_to_sheet(report);
-
-  XLSX.utils.book_append_sheet(wb, ws1, 'SERVICOS_FILTRADOS');
-  XLSX.utils.book_append_sheet(wb, ws2, 'RELATORIO_TECNICOS');
-
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'SERVICOS_FILTRADOS');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(report), 'RELATORIO_TECNICOS');
   XLSX.writeFile(wb, `relatorio_${dayRaw}.xlsx`);
 }
 
@@ -477,59 +415,19 @@ function exportPDF(){
     margin: { left: 40, right: 40 }
   });
 
-  const start = doc.lastAutoTable.finalY + 18;
-  doc.setFont('helvetica','bold');
-  doc.text('Serviços (filtrados)', 40, start);
-
-  const svcRows = view.rows.slice(0, 180).map(r => ([
-    safeStr(r.periodo),
-    safeStr(r.tecnico),
-    safeStr(r.motivo),
-    safeStr(r.nome),
-    (r.status==='concluido'?'Concluído':'Não concluído')
-  ]));
-
-  doc.autoTable({
-    startY: start + 14,
-    head: [['Período','Técnico','Motivo','Cliente','Status']],
-    body: svcRows,
-    styles: { font: 'helvetica', fontSize: 9, cellPadding: 5 },
-    headStyles: { fillColor: [24, 34, 66] },
-    margin: { left: 40, right: 40 },
-    didDrawPage: () => {
-      const page = doc.getNumberOfPages();
-      doc.setFontSize(9);
-      doc.setFont('helvetica','normal');
-      doc.text(`Página ${page}`, doc.internal.pageSize.getWidth()-80, doc.internal.pageSize.getHeight()-24);
-    }
-  });
-
   doc.save(`relatorio_${dayRaw}.pdf`);
 }
 
 els.exportPdfBtn.addEventListener('click', exportPDF);
 els.exportXlsxBtn.addEventListener('click', exportXlsx);
 
-function wireFilters(){
-  ['daySelect','techSelect','motivoSelect','periodoSelect'].forEach(id=>{
-    els[id].addEventListener('change', ()=>{
-      if(id==='daySelect') refreshFiltersForDay();
-      render();
-    });
+['daySelect','techSelect','motivoSelect','periodoSelect'].forEach(id=>{
+  els[id].addEventListener('change', ()=>{
+    if(id==='daySelect') refreshFiltersForDay();
+    render();
   });
-  els.searchInput.addEventListener('input', ()=>render());
-}
-
-function refreshFiltersForDay(){
-  const day = els.daySelect.value;
-  if(!day){ return; }
-  const { services } = parseSheet(day);
-
-  buildSelect(els.techSelect, uniqSorted(services.map(s=>s.tecnico)), 'Todos os técnicos');
-  buildSelect(els.motivoSelect, uniqSorted(services.map(s=>s.motivo)), 'Todos os motivos');
-  buildSelect(els.periodoSelect, uniqSorted(services.map(s=>s.periodo)), 'Todos os períodos');
-  els.searchInput.value = '';
-}
+});
+els.searchInput.addEventListener('input', ()=>render());
 
 els.fileInput.addEventListener('change', async (e)=>{
   const file = e.target.files?.[0];
@@ -539,11 +437,9 @@ els.fileInput.addEventListener('change', async (e)=>{
   WB = XLSX.read(buf, { type: 'array' });
   CACHE = {};
 
-  const days = WB.SheetNames.filter(isDateSheet).map(s=>s.trim());
-  days.sort((a,b)=>a.localeCompare(b));
-
+  const days = WB.SheetNames.filter(isDateSheet).map(s=>s.trim()).sort((a,b)=>a.localeCompare(b));
   if(days.length === 0){
-    els.hint.textContent = 'Não encontrei abas de dia (ex: 29042025). Verifique o padrão do arquivo.';
+    els.hint.textContent = '';
     setDisabled(true);
     return;
   }
@@ -557,6 +453,5 @@ els.fileInput.addEventListener('change', async (e)=>{
   render();
 });
 
-wireFilters();
 setDisabled(true);
 render();
